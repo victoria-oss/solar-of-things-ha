@@ -27,7 +27,7 @@ API_AUTH_BASE_URL   = "https://solar.siseli.com"         # auth / login endpoint
 # ─── Auth endpoints (discovered from portal JS bundle) ─────────────────────────
 # The login endpoint requires IOT-Open-AppID signing (see api.py _sign_request).
 API_LOGIN           = "/apis/login/account"              # POST + signed headers
-API_REFRESH_TOKEN   = "/login/refresh/access/token"      # POST, no token needed
+API_REFRESH_TOKEN   = "/apis/login/refresh/access/token"  # POST, no token needed
 
 # ─── IOT Open Platform app credentials (embedded in portal umi.js) ────────────
 # rBrTRfAPXz is the production AppID accepted by solar.siseli.com.

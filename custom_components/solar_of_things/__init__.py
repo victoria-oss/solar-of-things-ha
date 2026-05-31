@@ -31,6 +31,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import SolarOfThingsAPI, TokenExpiredError
@@ -69,28 +70,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Build the token-refreshed callback *before* constructing the API so the
     # callback reference is captured.
-    @callback
+    # NOTE: this callback is invoked from a background executor thread (inside
+    # api.login / api.refresh_access_token).  async_update_entry must only be
+    # called from the event loop, so we schedule it with call_soon_threadsafe.
     def _on_token_refreshed(
         access_token: str,
         refresh_token: str,
         access_expires: str,
         refresh_expires: str,
     ) -> None:
-        """Persist refreshed token back to the config entry (non-blocking)."""
-        hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF_IOT_TOKEN: access_token,
-                CONF_REFRESH_TOKEN: refresh_token,
-                CONF_ACCESS_TOKEN_EXPIRES: access_expires,
-                CONF_REFRESH_TOKEN_EXPIRES: refresh_expires,
-            },
-        )
-        _LOGGER.debug(
-            "SolarOfThings [%s]: access token refreshed; entry data updated",
-            entry.entry_id,
-        )
+        """Persist refreshed token back to the config entry (thread-safe)."""
+
+        @callback
+        def _update() -> None:
+            hass.config_entries.async_update_entry(
+                entry,
+                data={
+                    **entry.data,
+                    CONF_IOT_TOKEN: access_token,
+                    CONF_REFRESH_TOKEN: refresh_token,
+                    CONF_ACCESS_TOKEN_EXPIRES: access_expires,
+                    CONF_REFRESH_TOKEN_EXPIRES: refresh_expires,
+                },
+            )
+            _LOGGER.debug(
+                "SolarOfThings [%s]: access token refreshed; entry data updated",
+                entry.entry_id,
+            )
+
+        hass.loop.call_soon_threadsafe(_update)
 
     # Instantiate API in the appropriate auth mode
     if user_id and password:
@@ -164,6 +172,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Explicitly register the station hub device so that per-device entities
+    # can reference it via via_device without triggering the
+    # "non existing via_device" warning introduced in HA 2025.12.
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, station_id)},
+        name=f"Solar Station {station_id}",
+        manufacturer="Siseli",
+        model="Station",
+    )
+
     return True
 
 

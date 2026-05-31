@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.4.1] - 2026-05-31
+
+### Fixed
+- **Thread-safety crash** (HA warning: *"calls hass.config_entries.async_update_entry
+  from a thread other than the event loop"*) — the `on_token_refreshed` callback was
+  decorated `@callback` but invoked from a background executor thread during token
+  refresh. `async_update_entry` can only be called from the event loop. Fixed by
+  wrapping the update in a nested `@callback` and scheduling it with
+  `hass.loop.call_soon_threadsafe()`. Resolves crash/data-corruption risk reported
+  in issue #2.
+
+- **Token refresh 404** (*"token refresh request failed: 404 Not Found for url:
+  https://solar.siseli.com/login/refresh/access/token"*) — the refresh endpoint
+  was missing the `/apis/` prefix. Corrected to
+  `/apis/login/refresh/access/token`. This caused every token refresh to fail
+  silently, eventually leading to expired tokens and "Unknown" sensor values.
+  Resolves the sensor data issue reported in issue #2.
+
+- **`via_device` warning** (*"calls device_registry.async_get_or_create referencing
+  a non existing via_device … This will stop working in Home Assistant 2025.12.0"*)
+  — the station hub device was never explicitly registered in the device registry,
+  so per-device entities' `via_device` reference pointed to a non-existent device.
+  The station device is now registered in `async_setup_entry` before
+  `async_forward_entry_setups` is called. Resolves issue #2 comments from Gaz93
+  and andreasantorelli12-hue.
+
+---
+
 ## [2.4.0] - 2026-05-30
 
 ### Added
