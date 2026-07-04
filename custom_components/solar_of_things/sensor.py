@@ -13,6 +13,7 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -28,10 +29,29 @@ _TRANSLATION_KEYS: dict[str, str] = {
     "batteryChargingCurrent": "battery_charging_current",
     "batteryVoltage": "battery_voltage",
     "batteryPower": "battery_power",
-    "batterySOC": "battery_soc",
+    "batteryCapacity": "battery_soc",
     "feedInPower": "feed_in_power",
     "gridPower": "grid_power",
     "loadPower": "load_power",
+    "acInputVoltage": "ac_input_voltage",
+    "acInputFrequency": "ac_input_frequency",
+    "outputVoltage": "output_voltage",
+    "outputFrequency": "output_frequency",
+    "outputApparentPower": "output_apparent_power",
+    "pvInputVoltage": "pv_input_voltage",
+    "gridState": "grid_state",
+    "mainsRelayStatus": "mains_relay_status",
+    "battery_type": "battery_type",
+    "max_total_charge_current": "max_total_charge_current",
+    "utility_charge_current": "utility_charge_current",
+    "bulk_charging_voltage": "bulk_charging_voltage",
+    "float_charging_voltage": "float_charging_voltage",
+    "low_voltage_shutdown": "low_voltage_shutdown",
+    "battery_equalization_enabled": "battery_equalization_enabled",
+    "battery_equalization_voltage": "battery_equalization_voltage",
+    "battery_equalization_time": "battery_equalization_time",
+    "battery_equalization_timeout": "battery_equalization_timeout",
+    "battery_equalization_interval": "battery_equalization_interval",
     "monthly_pv_generated": "monthly_pv_generated",
     "monthly_grid_import": "monthly_grid_import",
     "monthly_total_consumption": "monthly_total_consumption",
@@ -91,7 +111,13 @@ async def async_setup_entry(
 
 
 class SolarOfThingsDeviceSensor(CoordinatorEntity, SensorEntity):
-    """Per-device telemetry sensor."""
+    """Per-device telemetry sensor.
+
+    Reads from either coordinator.data["time_series"] (live telemetry, the
+    default) or coordinator.data["settings"] (config-style values such as
+    charging voltages / equalization schedule), depending on the
+    sensor_definition's "source" field.
+    """
 
     def __init__(
         self,
@@ -118,8 +144,14 @@ class SolarOfThingsDeviceSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{station_id}_{device_id}_{sensor_key}"
         self._attr_icon = sensor_definition.get("icon")
 
+        if sensor_definition.get("diagnostic"):
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
         unit = sensor_definition.get("unit")
-        if unit == "W":
+        if sensor_definition.get("value_type") == "text":
+            # Text/status sensors: no device_class, unit, or state_class.
+            pass
+        elif unit == "W":
             self._attr_device_class = SensorDeviceClass.POWER
             self._attr_native_unit_of_measurement = UnitOfPower.WATT
             self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -135,10 +167,17 @@ class SolarOfThingsDeviceSensor(CoordinatorEntity, SensorEntity):
             self._attr_device_class = SensorDeviceClass.VOLTAGE
             self._attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
             self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif unit == "Hz":
+            self._attr_device_class = SensorDeviceClass.FREQUENCY
+            self._attr_native_unit_of_measurement = "Hz"
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         elif unit == "%":
             if "battery" in sensor_key.lower():
                 self._attr_device_class = SensorDeviceClass.BATTERY
             self._attr_native_unit_of_measurement = PERCENTAGE
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif unit in ("VA", "min", "d"):
+            self._attr_native_unit_of_measurement = unit
             self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
@@ -153,10 +192,25 @@ class SolarOfThingsDeviceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        ts = (self.coordinator.data or {}).get("time_series") or {}
-        val = ts.get(self._sensor_key)
+        data = self.coordinator.data or {}
+        source = self._sensor_definition.get("source", "time_series")
+
+        if source == "settings":
+            settings = data.get("settings") or {}
+            settings_key = self._sensor_definition.get("settings_key")
+            entry = settings.get(settings_key) or {}
+            value_field = self._sensor_definition.get("value_field", "value")
+            val = entry.get(value_field)
+        else:
+            ts = data.get("time_series") or {}
+            val = ts.get(self._sensor_key)
+
         if val is None:
             return None
+
+        if self._sensor_definition.get("value_type") == "text":
+            return str(val)
+
         try:
             return round(float(val), 2)
         except Exception:
