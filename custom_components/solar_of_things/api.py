@@ -227,7 +227,7 @@ class SolarOfThingsAPI:
     on_token_refreshed: Optional callback(access_token, refresh_token,
                         access_expires_iso, refresh_expires_iso) called after
                         every successful token refresh so the HA entry can
-                        persist the new tokens without restarting.
+                        persist the new token state without restarting.
     """
 
     def __init__(
@@ -589,6 +589,56 @@ class SolarOfThingsAPI:
 
     # ─── Time-series (per device) ──────────────────────────────────────────────
 
+    # NOTE ON THE EXTRA KEYS BELOW
+    # ─────────────────────────────────────────────────────────────────────────
+    # The keys already in use (pvInputPower, acOutputActivePower, batteryVoltage,
+    # batteryDischargeCurrent, batteryChargingCurrent, feedInPower, batterySOC)
+    # were confirmed working against the live API.
+    #
+    # The additional keys below are *candidates* added to cover the extra
+    # panel readings you want (AC input voltage/frequency, output voltage/
+    # frequency/apparent power, PV input voltage, working state, PV status,
+    # grid state, mains input range, mains relay status, battery state,
+    # battery type, NTC temperature). They follow the same camelCase naming
+    # convention as the confirmed keys, but they have NOT been verified
+    # against a real response yet.
+    #
+    # This is safe to try: if the backend doesn't recognise a key, the
+    # `fields` dict in the response simply won't contain it (or will map to
+    # an empty list), and it will be silently skipped below — it won't break
+    # the other sensors.
+    #
+    # TO CONFIRM THE REAL KEY NAMES:
+    #   1. Enable debug logging for this integration:
+    #        logger:
+    #          logs:
+    #            custom_components.solar_of_things: debug
+    #   2. Restart HA, let one coordinator poll happen, and grab the
+    #      "latest_values" (or the raw `fields` dict) from the log.
+    #   3. Any candidate key below that comes back empty should be renamed
+    #      to whatever key actually appears in the raw response, or removed
+    #      if the value isn't available via this endpoint at all (some of
+    #      these — e.g. working state / relay status — may only be exposed
+    #      via get_device_settings() instead of the time-series endpoint).
+    _EXTRA_TELEMETRY_KEYS: list[str] = [
+        "acInputVoltage",
+        "acInputFrequency",
+        "outputVoltage",
+        "outputFrequency",
+        "outputApparentPower",
+        "loadPercent",
+        "pvInputVoltage",
+        "batteryCapacity",
+        "batteryType",
+        "batteryState",
+        "workingState",
+        "pvStatus",
+        "gridState",
+        "mainsInputRange",
+        "mainsRelayStatus",
+        "ntcTemperature",
+    ]
+
     def fetch_latest_data(self, device_id: str) -> dict[str, Any]:
         """Fetch the latest readings for a device (last 1 hour)."""
         end_time = self._now()
@@ -602,6 +652,7 @@ class SolarOfThingsAPI:
             "batteryVoltage",
             "feedInPower",
             "batterySOC",
+            *self._EXTRA_TELEMETRY_KEYS,
         ]
 
         data = self._post(
@@ -651,7 +702,7 @@ class SolarOfThingsAPI:
         feed_in = float(latest_values.get("feedInPower") or 0)
         battery_power = float(latest_values.get("batteryPower") or 0)
 
-        latest_values["gridPower"] = max(0.0, ac_output - pv_power + battery_power + feed_in)
+        latest_values["gridPower"] = max(0.0, ac_output - pv_power - battery_power + feed_in)
         latest_values["loadPower"] = ac_output
 
         return latest_values
@@ -752,6 +803,53 @@ class SolarOfThingsAPI:
     # Alias used by the coordinator in __init__.py
     fetch_settings = get_device_settings
 
+    # ─── Extended (mostly-static) settings for the new sensors ─────────────────
+    # These are configuration-style values (charge-current limits, charging
+    # voltage curve, equalization schedule, low-voltage cutoff) that live in
+    # the settings API rather than the time-series API. They change rarely,
+    # so it's fine for the coordinator to poll them on the same interval as
+    # everything else, or on a slower interval if you want to cut down on
+    # API calls (see __init__.py coordinator).
+    #
+    # AS WITH _EXTRA_TELEMETRY_KEYS ABOVE: the left-hand keys are candidates
+    # based on the existing naming convention (outputSourcePrioritySetting,
+    # chargerSourcePrioritySetting, acInputRangeSetting, batteryChargeLimit,
+    # batteryDischargeLimit, gridChargeLimit). Confirm the real key names via
+    # get_device_settings() output in debug logs and adjust this map if any
+    # come back missing.
+    _EXTENDED_SETTINGS_MAP: dict[str, str] = {
+        "maxTotalChargeCurrent": "max_total_charge_current",
+        "utilityChargeCurrent": "utility_charge_current",
+        "bulkChargingVoltage": "bulk_charging_voltage",
+        "floatChargingVoltage": "float_charging_voltage",
+        "lowVoltageShutdown": "low_voltage_shutdown",
+        "batteryEqualizationEnabled": "battery_equalization_enabled",
+        "batteryEqualizationVoltage": "battery_equalization_voltage",
+        "batteryEqualizationTime": "battery_equalization_time",
+        "batteryEqualizationTimeout": "battery_equalization_timeout",
+        "batteryEqualizationInterval": "battery_equalization_interval",
+        "loadStatus": "load_status",
+    }
+
+    def fetch_extended_settings(self, device_id: str) -> dict[str, Any]:
+        """Fetch the extra config-style values and flatten them to plain values.
+
+        get_device_settings() returns each item as an object like
+        {"key": "...", "value": ..., "valueDisplay": "..."}; this pulls out
+        just the numeric/raw `value` for each key we care about, using the
+        friendly snake_case names in _EXTENDED_SETTINGS_MAP so they line up
+        with what const.py / sensor.py will expect.
+        """
+        raw = self.get_device_settings(device_id)
+        result: dict[str, Any] = {}
+        for api_key, local_key in self._EXTENDED_SETTINGS_MAP.items():
+            entry = raw.get(api_key)
+            if isinstance(entry, dict):
+                result[local_key] = entry.get("value", entry.get("valueDisplay"))
+            elif entry is not None:
+                result[local_key] = entry
+        return result
+
     def update_device_settings(self, device_id: str, settings: dict[str, Any]) -> None:
         """Write multiple settings (one API call per key)."""
         for key, value in settings.items():
@@ -830,3 +928,4 @@ class SolarOfThingsAPI:
         except Exception as err:
             _LOGGER.error("SolarOfThings: connection test failed: %s", err)
             return False
+
