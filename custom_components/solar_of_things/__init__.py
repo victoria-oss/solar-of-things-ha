@@ -52,8 +52,8 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.SWITCH]
 
-DEVICE_UPDATE_INTERVAL = timedelta(minutes=5)
-STATION_UPDATE_INTERVAL = timedelta(minutes=30)
+DEVICE_UPDATE_INTERVAL = timedelta(seconds=10)
+STATION_UPDATE_INTERVAL = timedelta(minutes=10)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -238,7 +238,6 @@ class SolarOfThingsStationCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Station update failed: {err}") from err
 
-
 class SolarOfThingsDeviceCoordinator(DataUpdateCoordinator):
     """Fetch device-level telemetry + settings."""
 
@@ -271,6 +270,8 @@ class SolarOfThingsDeviceCoordinator(DataUpdateCoordinator):
             settings = await self.hass.async_add_executor_job(
                 self.api.fetch_settings, self.device_id
             )
+            _LOGGER.debug("SolarOfThings device %s: time_series = %s", self.device_id, time_series)
+            _LOGGER.debug("SolarOfThings device %s: settings = %s", self.device_id, settings)
             return {
                 "time_series": time_series,
                 "settings": settings,
