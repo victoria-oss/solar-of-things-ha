@@ -270,11 +270,16 @@ class SolarOfThingsDeviceCoordinator(DataUpdateCoordinator):
             settings = await self.hass.async_add_executor_job(
                 self.api.fetch_settings, self.device_id
             )
+            overview = await self.hass.async_add_executor_job(
+                self.api.fetch_device_overview, self.device_id
+            )
             _LOGGER.debug("SolarOfThings device %s: time_series = %s", self.device_id, time_series)
             _LOGGER.debug("SolarOfThings device %s: settings = %s", self.device_id, settings)
+            _LOGGER.debug("SolarOfThings device %s: overview = %s", self.device_id, overview)
             return {
                 "time_series": time_series,
                 "settings": settings,
+                "overview": overview,
                 "device": self.device_id,
                 "station_id": self.station_id,
                 "device_meta": self.device_meta,
