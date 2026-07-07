@@ -87,6 +87,7 @@ from .const import (
     API_LOGIN,
     API_REFRESH_TOKEN as API_REFRESH_TOKEN_ENDPOINT,
     API_TIME_SERIES,
+    API_DEVICE_OVERVIEW,
     API_MONTHLY_SUMMARY,
     API_DEVICE_LIST,
     API_SETTINGS_GET,
@@ -707,6 +708,49 @@ class SolarOfThingsAPI:
 
         return latest_values
 
+    # ─── Full device overview (portal detail page data source) ────────────────
+
+    def fetch_device_overview(self, device_id: str) -> dict[str, Any]:
+        """Fetch the full device status overview.
+
+        This is the same endpoint the Siseli portal's device detail page
+        calls directly (confirmed 2026-07-06 via browser DevTools). It
+        returns a much richer attribute set than fetch_latest_data(), using
+        the device's real internal key names — including fields the
+        time-series API does not expose at all, such as ntcMaximumTemperature,
+        workingStates, batState, and outputRelayStatus.
+
+        Returns a flat dict of {key: value} using each field's numeric/raw
+        `value`, plus a companion `<key>_display` entry holding the
+        human-readable valueDisplay string, so callers can use either.
+        """
+        self._ensure_token_valid()
+        url = f"{API_BASE_URL}{API_DEVICE_OVERVIEW}?deviceId={device_id}&dataSource=1"
+        resp = self.session.get(url, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("code") not in (0, None):
+            raise RuntimeError(
+                f"Device overview error code={data.get('code')} "
+                f"message={data.get('message')}"
+            )
+
+        fields = (
+            (data.get("data") or {})
+            .get("deviceAttributeState", {})
+            .get("fields", {})
+        )
+
+        result: dict[str, Any] = {}
+        for key, entry in fields.items():
+            if not isinstance(entry, dict):
+                continue
+            result[key] = entry.get("value")
+            result[f"{key}_display"] = entry.get("valueDisplay")
+
+        return result
+
     # ─── Monthly summary (station) ─────────────────────────────────────────────
 
     def fetch_monthly_summary(self, station_id: str) -> dict[str, Any]:
@@ -928,4 +972,3 @@ class SolarOfThingsAPI:
         except Exception as err:
             _LOGGER.error("SolarOfThings: connection test failed: %s", err)
             return False
-
