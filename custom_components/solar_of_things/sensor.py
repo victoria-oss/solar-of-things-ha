@@ -52,6 +52,13 @@ _TRANSLATION_KEYS: dict[str, str] = {
     "battery_equalization_time": "battery_equalization_time",
     "battery_equalization_timeout": "battery_equalization_timeout",
     "battery_equalization_interval": "battery_equalization_interval",
+    "ntc_maximum_temperature": "ntc_maximum_temperature",
+    "working_state": "working_state",
+    "battery_state": "battery_state",
+    "pv_status": "pv_status",
+    "output_relay_status": "output_relay_status",
+    "photovoltaic_access_flag": "photovoltaic_access_flag",
+    "load_status": "load_status",
     "monthly_pv_generated": "monthly_pv_generated",
     "monthly_grid_import": "monthly_grid_import",
     "monthly_total_consumption": "monthly_total_consumption",
@@ -176,6 +183,10 @@ class SolarOfThingsDeviceSensor(CoordinatorEntity, SensorEntity):
                 self._attr_device_class = SensorDeviceClass.BATTERY
             self._attr_native_unit_of_measurement = PERCENTAGE
             self._attr_state_class = SensorStateClass.MEASUREMENT
+        elif unit == "°C":
+            self._attr_device_class = SensorDeviceClass.TEMPERATURE
+            self._attr_native_unit_of_measurement = "°C"
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         elif unit in ("VA", "min", "d"):
             self._attr_native_unit_of_measurement = unit
             self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -201,6 +212,17 @@ class SolarOfThingsDeviceSensor(CoordinatorEntity, SensorEntity):
             entry = settings.get(settings_key) or {}
             value_field = self._sensor_definition.get("value_field", "value")
             val = entry.get(value_field)
+        elif source == "overview":
+            # fetch_device_overview() returns a flat dict where each field key
+            # maps to its raw value, with a companion "<key>_display" entry
+            # holding the human-readable string. value_field picks between them.
+            overview = data.get("overview") or {}
+            overview_key = self._sensor_definition.get("overview_key")
+            value_field = self._sensor_definition.get("value_field", "value")
+            if value_field == "valueDisplay":
+                val = overview.get(f"{overview_key}_display")
+            else:
+                val = overview.get(overview_key)
         else:
             ts = data.get("time_series") or {}
             val = ts.get(self._sensor_key)
