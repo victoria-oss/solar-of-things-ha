@@ -44,6 +44,12 @@ API_MONTHLY_SUMMARY = "/apis/stationOverView/stateAttributeSummary/category/year
 API_SETTINGS_GET   = "/apis/remote/device/configs/cache/get"  # ?deviceId=<id>
 API_SETTINGS_SET   = "/apis/remote/device/config/write"       # ?deviceId=<id>
 API_DEVICE_LIST    = "/apis/device/list"
+# Full device status overview — same data source as the Siseli portal's device
+# detail page. Confirmed 2026-07-06 via browser DevTools Network tab. Returns
+# a much more complete attribute set than API_TIME_SERIES, using real internal
+# key names, and includes fields unavailable anywhere else (e.g.
+# ntcMaximumTemperature, workingStates, batState, outputRelayStatus).
+API_DEVICE_OVERVIEW = "/apis/deviceState/simple/energy/flow/v1"  # ?deviceId=<id>&dataSource=1
 
 # ─── Token refresh window ──────────────────────────────────────────────────────
 # Refresh the access token this many seconds *before* its stated expiry.
@@ -289,6 +295,75 @@ SENSOR_DEFINITIONS = {
         "source": "settings",
         "settings_key": "batteryEqualizationIntervalSetting",
         "value_field": "value",
+        "diagnostic": True,
+    },
+
+    # ── Overview-derived sensors (read from coordinator.data["overview"]) ─────
+    # Sourced from API_DEVICE_OVERVIEW, confirmed live 2026-07-06 via the
+    # Siseli portal's own device detail page network call. Real key names
+    # differ slightly from earlier guesses (workingStates w/ trailing "s",
+    # batState, pvStatuss — a typo in Siseli's own API, not ours).
+    "ntc_maximum_temperature": {
+        "name": "NTC Maximum Temperature",
+        "unit": "°C",
+        "device_class": "temperature",
+        "icon": "mdi:thermometer",
+        "source": "overview",
+        "overview_key": "ntcMaximumTemperature",
+        "value_field": "value",
+    },
+    "working_state": {
+        "name": "Working State",
+        "value_type": "text",
+        "icon": "mdi:state-machine",
+        "source": "overview",
+        "overview_key": "workingStates",
+        "value_field": "valueDisplay",
+        "diagnostic": True,
+    },
+    "battery_state": {
+        "name": "Battery State",
+        "value_type": "text",
+        "icon": "mdi:battery-sync-outline",
+        "source": "overview",
+        "overview_key": "batState",
+        "value_field": "valueDisplay",
+        "diagnostic": True,
+    },
+    "pv_status": {
+        "name": "PV Status",
+        "value_type": "text",
+        "icon": "mdi:solar-power-variant",
+        "source": "overview",
+        "overview_key": "pvStatuss",
+        "value_field": "valueDisplay",
+        "diagnostic": True,
+    },
+    "output_relay_status": {
+        "name": "Output Relay Status",
+        "value_type": "text",
+        "icon": "mdi:electric-switch",
+        "source": "overview",
+        "overview_key": "outputRelayStatus",
+        "value_field": "valueDisplay",
+        "diagnostic": True,
+    },
+    "photovoltaic_access_flag": {
+        "name": "Photovoltaic Access Flag",
+        "value_type": "text",
+        "icon": "mdi:solar-panel",
+        "source": "overview",
+        "overview_key": "photovoltaicAccessFlag",
+        "value_field": "valueDisplay",
+        "diagnostic": True,
+    },
+    "load_status": {
+        "name": "Load Status",
+        "value_type": "text",
+        "icon": "mdi:home-lightning-bolt-outline",
+        "source": "overview",
+        "overview_key": "loadStatus",
+        "value_field": "valueDisplay",
         "diagnostic": True,
     },
 
